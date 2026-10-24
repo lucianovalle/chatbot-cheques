@@ -1,0 +1,14 @@
+:root {
+  color: #1c2422;
+  background: #f3f6f4;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  line-height: 1.45;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}

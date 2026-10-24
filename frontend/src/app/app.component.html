@@ -1,0 +1,98 @@
+<main class="page">
+  <header class="top">
+    <div>
+      <p class="eyebrow">MySQL + LangChain4j + Angular</p>
+      <h1>Recebíveis para antecipar</h1>
+      <p class="hint">
+        Perguntas sobre o produto usam o manual. Perguntas gerais vão direto ao modelo
+        <strong>{{ modelName() }}</strong>. A frase <strong>quero antecipar</strong> abre as opções de cheque, boleto e valor.
+      </p>
+    </div>
+    <button type="button" class="ghost" (click)="clear()" [disabled]="sending()">
+      Nova conversa
+    </button>
+  </header>
+
+  <section class="transcript" aria-live="polite">
+    @if (messages().length === 0) {
+      <p class="empty">
+        Pergunte o que é o produto ou se você tem recebíveis para antecipar.
+        Para escolher os títulos, escreva quero antecipar.
+      </p>
+    }
+
+    @for (msg of messages(); track $index) {
+      <article class="bubble" [class.user]="msg.role === 'user'" [class.bot]="msg.role === 'bot'">
+        <span>{{ msg.role === 'user' ? 'Você' : 'Assistente' }}</span>
+        <p>{{ msg.text }}</p>
+      </article>
+    }
+
+    @if (sending()) {
+      <p class="pending">{{ textoPendente() }}</p>
+    }
+  </section>
+
+  @if (error()) {
+    <p class="error" role="alert">{{ error() }}</p>
+  }
+
+  <form class="composer" (ngSubmit)="enviar()">
+    <label class="sr-only" for="mensagem">Mensagem</label>
+    <input
+      id="mensagem"
+      name="mensagem"
+      [(ngModel)]="mensagem"
+      placeholder="Escreva sua pergunta"
+      autocomplete="off"
+      [disabled]="sending()"
+    />
+    <button type="submit" [disabled]="!mensagem.trim() || sending()">Enviar</button>
+  </form>
+
+  @if (perguntasVisiveis) {
+  <form class="perguntas" (ngSubmit)="consultar()">
+    <fieldset>
+      <legend>1. Quais recebíveis você quer antecipar?</legend>
+      <label>
+        <input type="checkbox" name="cheque" [(ngModel)]="cheque" [disabled]="sending()" />
+        Cheque
+      </label>
+      <label>
+        <input type="checkbox" name="boleto" [(ngModel)]="boleto" [disabled]="sending()" />
+        Boleto
+      </label>
+    </fieldset>
+
+    @if (cheque || boleto) {
+      <fieldset>
+        <legend>2. O que você quer ver?</legend>
+        <label>
+          <input type="radio" name="modo" value="melhores" [(ngModel)]="modo" [disabled]="sending()" />
+          Quais são melhores para antecipar?
+        </label>
+        <label>
+          <input type="radio" name="modo" value="ate-valor" [(ngModel)]="modo" [disabled]="sending()" />
+          Quero antecipar o valor de
+        </label>
+        @if (modo === 'ate-valor') {
+          <label class="valor">
+            Valor
+            <input
+              name="valor"
+              type="number"
+              min="0.01"
+              step="0.01"
+              [(ngModel)]="valor"
+              placeholder="50000"
+              [disabled]="sending()"
+            />
+          </label>
+        }
+      </fieldset>
+    }
+
+    <button type="submit" [disabled]="!podeConsultar()">Consultar</button>
+  </form>
+  }
+</main>

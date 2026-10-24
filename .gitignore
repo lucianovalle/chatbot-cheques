@@ -1,0 +1,8 @@
+backend/target/
+frontend/node_modules/
+frontend/dist/
+frontend/.angular/
+backend/src/main/resources/application-local.properties
+.idea/
+*.iml
+.vscode/
