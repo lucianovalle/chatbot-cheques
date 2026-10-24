@@ -1,3 +1,4 @@
+<div class="shell">
 <main class="page">
   <header class="top">
     <div>
@@ -6,18 +7,74 @@
       <p class="hint">
         Perguntas sobre o produto usam o manual. Perguntas gerais vão direto ao modelo
         <strong>{{ modelName() }}</strong>. A frase <strong>quero antecipar</strong> abre as opções de cheque, boleto e valor.
+        A conversa fica salva para o usuário <strong>{{ usuarioNome() }}</strong>.
       </p>
     </div>
-    <button type="button" class="ghost" (click)="clear()" [disabled]="sending()">
-      Nova conversa
-    </button>
+    <div class="acoes">
+      <label class="conversas">
+        Conversas
+        <select
+          [ngModel]="sessaoAtual()"
+          (ngModelChange)="abrirSessao($event)"
+          [disabled]="sending() || sessoesVisiveis().length === 0"
+        >
+          @for (sessao of sessoesVisiveis(); track sessao.sessaoId) {
+            <option [value]="sessao.sessaoId">{{ sessao.rotulo }}</option>
+          }
+        </select>
+      </label>
+      <button type="button" class="ghost" (click)="clear()" [disabled]="sending()">
+        Nova conversa
+      </button>
+    </div>
   </header>
 
+  @if (listaTela(); as itens) {
+    <section class="painel-lista">
+      <div class="topo-lista">
+        <div>
+          <p class="eyebrow">Mesma ordem do Java</p>
+          <h2>Recebíveis para antecipar</h2>
+        </div>
+        <button type="button" class="ghost" (click)="fecharLista()">Voltar ao chat</button>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Tipo</th>
+            <th>Número</th>
+            <th>Valor</th>
+            <th>Vencimento</th>
+            <th>Dias</th>
+            <th>Desconto</th>
+            <th>Líquido</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (item of itens; track item.ordem) {
+            <tr>
+              <td>{{ item.ordem }}</td>
+              <td>{{ item.tipo }}</td>
+              <td>{{ item.numero }}</td>
+              <td>{{ formatarMoeda(item.valor) }}</td>
+              <td>{{ item.vencimento }}</td>
+              <td>{{ item.dias }}</td>
+              <td>{{ formatarMoeda(item.desconto) }}</td>
+              <td>{{ formatarMoeda(item.liquido) }}</td>
+            </tr>
+          }
+        </tbody>
+      </table>
+      <p class="soma">{{ itens.length }} título(s). Soma dos líquidos: {{ formatarMoeda(somaLista()) }}</p>
+    </section>
+  } @else {
   <section class="transcript" aria-live="polite">
     @if (messages().length === 0) {
       <p class="empty">
         Pergunte o que é o produto ou se você tem recebíveis para antecipar.
         Para escolher os títulos, escreva quero antecipar.
+        A combo acima troca de sessão pela data.
       </p>
     }
 
@@ -25,6 +82,9 @@
       <article class="bubble" [class.user]="msg.role === 'user'" [class.bot]="msg.role === 'bot'">
         <span>{{ msg.role === 'user' ? 'Você' : 'Assistente' }}</span>
         <p>{{ msg.text }}</p>
+        @if (msg.itens && msg.itens.length > 0) {
+          <button type="button" class="antecipar" (click)="abrirLista(msg)">Antecipar</button>
+        }
       </article>
     }
 
@@ -36,19 +96,6 @@
   @if (error()) {
     <p class="error" role="alert">{{ error() }}</p>
   }
-
-  <form class="composer" (ngSubmit)="enviar()">
-    <label class="sr-only" for="mensagem">Mensagem</label>
-    <input
-      id="mensagem"
-      name="mensagem"
-      [(ngModel)]="mensagem"
-      placeholder="Escreva sua pergunta"
-      autocomplete="off"
-      [disabled]="sending()"
-    />
-    <button type="submit" [disabled]="!mensagem.trim() || sending()">Enviar</button>
-  </form>
 
   @if (perguntasVisiveis) {
   <form class="perguntas" (ngSubmit)="consultar()">
@@ -95,4 +142,40 @@
     <button type="submit" [disabled]="!podeConsultar()">Consultar</button>
   </form>
   }
+
+  <form class="composer" (ngSubmit)="enviar()">
+    <label class="sr-only" for="mensagem">Mensagem</label>
+    <input
+      id="mensagem"
+      name="mensagem"
+      [(ngModel)]="mensagem"
+      placeholder="Escreva sua pergunta"
+      autocomplete="off"
+      [disabled]="sending()"
+    />
+    <button type="submit" [disabled]="!mensagem.trim() || sending()">Enviar</button>
+  </form>
+  }
 </main>
+
+<aside class="guia">
+  <h2>Perguntas para testar</h2>
+  <p>Clique para colocar a frase no campo. Passe o mouse para ver qual caminho ela usa.</p>
+  @for (grupo of exemplos; track grupo.titulo) {
+    <section>
+      <h3>{{ grupo.titulo }}</h3>
+      @for (item of grupo.itens; track item.texto) {
+        <button
+          type="button"
+          class="exemplo"
+          [title]="item.caminho"
+          (click)="usarExemplo(item.texto)"
+          [disabled]="sending()"
+        >
+          {{ item.texto }}
+        </button>
+      }
+    </section>
+  }
+</aside>
+</div>

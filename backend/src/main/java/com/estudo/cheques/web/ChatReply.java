@@ -1,4 +1,8 @@
 package com.estudo.cheques.web;
 
-public record ChatReply(String answer) {
+import com.estudo.cheques.recebivel.RecebivelItem;
+import java.util.List;
+
+/** answer enche o balão. itens alimenta a tela que abre no botão Antecipar. */
+public record ChatReply(String answer, List<RecebivelItem> itens) {
 }

@@ -1,8 +1,11 @@
 package com.estudo.cheques.service;
 
-import com.estudo.cheques.config.ChatConfig;
 import com.estudo.cheques.config.OllamaProperties;
+import com.estudo.cheques.conversa.HistoricoConversaService;
+import com.estudo.cheques.conversa.MemoriaPorSessao;
+import com.estudo.cheques.conversa.TipoMemoria;
 import com.estudo.cheques.recebivel.ChequeConsulta;
+import com.estudo.cheques.recebivel.ListaCalculada;
 import com.estudo.cheques.web.IncomingMessage;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -18,21 +21,28 @@ import java.util.List;
 import java.util.Locale;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
- * Ponto de entrada de cada mensagem. A IA não entra em todo pedido.
- * O método reply escolhe um de quatro caminhos:
- * 1. Formulário (quero antecipar) — o Java calcula e responde na hora.
- * 2. Produto (o que é, benefícios, regra) — o llama3.2 lê os manuais da pasta docs.
- * 3. Pergunta geral (capital do Brasil) — o llama3.2 responde sozinho, sem banco.
- * 4. Dados de cheque ou boleto — o llama3.2 escolhe uma ferramenta e o Java lê o MySQL.
+ * Quarto da fila e primeiro que decide de verdade.
+ * A tela já mandou um modo. Este reply confere de novo, nesta ordem.
+ * O primeiro if que servir responde. Os de baixo não rodam.
+ * 1. abertura — texto fixo. Sem modelo.
+ * 2. melhores ou ate-valor — ChequeConsulta. Sem modelo.
+ * 3. produto — AssistenteProduto lê o manual. Memória termina em _manual.
+ * 4. frase sem recebível — chatModel sozinho. Sem ferramenta e sem MySQL.
+ * 5. recebível — AssistenteRecebiveis. O modelo escolhe RecebivelTools. Memória _dados.
+ * No fim de cada caminho, HistoricoConversaService grava a frase que a tela mostra.
  */
 @Service
 public class ChatService {
 
     private static final Logger log = LoggerFactory.getLogger(ChatService.class);
+
+    /** Resposta fixa de "quero antecipar". Não passa pelo modelo, mas fica no histórico. */
+    static final String TEXTO_ABERTURA =
+            "Para antecipar, marque cheque, boleto ou os dois e escolha se quer ver os melhores ou cobrir um valor.";
 
     private static final String[] ASSUNTOS_DO_PRODUTO = {
         "o que e o produto",
@@ -58,8 +68,8 @@ public class ChatService {
     private final AssistenteRecebiveis assistente;
     private final AssistenteProduto assistenteProduto;
     private final ChatModel chatModel;
-    private final ChatMemory memory;
-    private final ChatMemory memoriaProduto;
+    private final MemoriaPorSessao memorias;
+    private final HistoricoConversaService historico;
     private final OllamaProperties ollama;
     private final ChequeConsulta chequeConsulta;
 
@@ -67,15 +77,15 @@ public class ChatService {
             AssistenteRecebiveis assistente,
             AssistenteProduto assistenteProduto,
             ChatModel chatModel,
-            @Qualifier("memoriaChat") ChatMemory memory,
-            @Qualifier("memoriaProduto") ChatMemory memoriaProduto,
+            MemoriaPorSessao memorias,
+            HistoricoConversaService historico,
             OllamaProperties ollama,
             ChequeConsulta chequeConsulta) {
         this.assistente = assistente;
         this.assistenteProduto = assistenteProduto;
         this.chatModel = chatModel;
-        this.memory = memory;
-        this.memoriaProduto = memoriaProduto;
+        this.memorias = memorias;
+        this.historico = historico;
         this.ollama = ollama;
         this.chequeConsulta = chequeConsulta;
     }
@@ -88,39 +98,52 @@ public class ChatService {
         return ollama.baseUrl();
     }
 
-    public synchronized String reply(IncomingMessage pedido) {
+    public synchronized RespostaChat reply(IncomingMessage pedido) {
         String userText = pedido.message().trim();
-        // O Angular manda "modo" para dizer qual caminho usar.
-        // melhores e ate-valor vêm do botão Consultar. Não chamam o modelo.
+        String sessaoId = pedido.sessaoId();
+        historico.conferirSessao(sessaoId);
+
+        // 1. A tela já abriu cheque e boleto. Aqui só grava a frase.
+        if ("abertura".equals(pedido.modo())) {
+            gravarNaMemoriaDeDados(sessaoId, userText, TEXTO_ABERTURA);
+            historico.registrarTurno(sessaoId, TipoMemoria.DADOS, userText, TEXTO_ABERTURA);
+            log.info("Abertura do formulário gravada na sessão {}, sem chamar o modelo", sessaoId);
+            return new RespostaChat(TEXTO_ABERTURA);
+        }
+
+        // 2. Veio do botão Consultar. ChequeConsulta lê o MySQL e faz a conta.
+        // A lista de itens é a mesma conta: a tela Antecipar não interpreta o texto.
         if ("melhores".equals(pedido.modo()) || "ate-valor".equals(pedido.modo())) {
-            String answer = consultaDireta(pedido);
+            ListaCalculada calculo = consultaDireta(pedido);
+            gravarNaMemoriaDeDados(sessaoId, userText, calculo.texto());
+            historico.registrarTurno(sessaoId, TipoMemoria.DADOS, userText, calculo.texto());
             log.info("Consulta do formulário respondida pelo Java, sem chamar o modelo");
-            memory.add(UserMessage.from(userText));
-            memory.add(AiMessage.from(answer));
-            return answer;
+            return new RespostaChat(calculo.texto(), calculo.itens());
         }
 
         try {
-            // Manual primeiro. "O que é a antecipação" também contém a palavra recebível,
-            // mas a explicação está no documento, não na tabela.
+            // 3. Manual antes de recebível. "O que é a antecipação" tem a palavra recebível,
+            // mas a resposta está no documento, não na tabela.
             if ("produto".equals(pedido.modo()) || falaDeProduto(userText)) {
                 log.info("Pergunta de produto respondida pelo modelo {} com os manuais", ollama.modelName());
-                String answer = assistenteProduto.explicar(userText);
-                if (answer == null || answer.isBlank()) {
-                    return "(O modelo respondeu sem texto.)";
-                }
-                return answer;
+                String answer = textoOuVazio(assistenteProduto.explicar(MemoriaPorSessao.idManual(sessaoId), userText));
+                historico.registrarTurno(sessaoId, TipoMemoria.MANUAL, userText, answer);
+                return new RespostaChat(answer);
             }
-            if ("geral".equals(pedido.modo()) || !falaDeRecebivel(userText)) {
+            // 4. Pergunta geral. O modo "geral" da tela não basta: se houver recebível, cai no 5.
+            if (!falaDeRecebivel(userText)) {
                 log.info("Pergunta geral respondida pelo modelo {}, sem ferramenta e sem banco", ollama.modelName());
-                return responderDireto(userText);
+                String answer = responderDireto(sessaoId, userText);
+                historico.registrarTurno(sessaoId, TipoMemoria.DADOS, userText, answer);
+                return new RespostaChat(answer);
             }
+            // 5. O modelo escolhe a ferramenta. Quem lê o MySQL é o ChequeConsulta.
             log.info("Pergunta sobre recebíveis para o modelo {} escolher a ferramenta", ollama.modelName());
-            String answer = assistente.responder(userText);
-            if (answer == null || answer.isBlank()) {
-                return "(O modelo respondeu sem texto.)";
-            }
-            return answer;
+            String answer = textoOuVazio(assistente.responder(MemoriaPorSessao.idDados(sessaoId), userText));
+            historico.registrarTurno(sessaoId, TipoMemoria.DADOS, userText, answer);
+            return new RespostaChat(answer);
+        } catch (ResponseStatusException ex) {
+            throw ex;
         } catch (RuntimeException ex) {
             throw new ModeloIndisponivelException(
                     "Não consegui falar com o Ollama em " + ollama.baseUrl()
@@ -130,17 +153,45 @@ public class ChatService {
         }
     }
 
-    /** Manda a frase ao llama3.2 sem ferramenta e sem trecho de manual. */
-    private String responderDireto(String userText) {
-        List<ChatMessage> turn = new ArrayList<>(memory.messages());
+    /**
+     * Manda a frase ao llama3.2 sem ferramenta e sem trecho de manual.
+     * A instrução daqui não cita ferramenta. Se citasse, o modelo responderia
+     * "vou chamar a ferramenta" sem ter como chamá-la.
+     */
+    private String responderDireto(String sessaoId, String userText) {
+        ChatMemory memoria = memorias.get(MemoriaPorSessao.idDados(sessaoId));
+        List<ChatMessage> turn = new ArrayList<>();
+        turn.add(SystemMessage.from("""
+                Responda em português, em poucas frases.
+                Não invente quantidade, número, valor ou taxa de recebíveis.
+                """));
+        for (ChatMessage mensagem : memoria.messages()) {
+            if (!(mensagem instanceof SystemMessage)) {
+                turn.add(mensagem);
+            }
+        }
         turn.add(UserMessage.from(userText));
         ChatResponse response = chatModel.chat(turn);
-        String answer = response.aiMessage().text();
+        String answer = textoOuVazio(response.aiMessage().text());
+        memoria.add(UserMessage.from(userText));
+        memoria.add(AiMessage.from(answer));
+        return answer;
+    }
+
+    /**
+     * Formulário e abertura não passam pelo AiServices, então a frase é colocada
+     * na memória de dados à mão. Assim a próxima pergunta geral ainda enxerga o turno.
+     */
+    private void gravarNaMemoriaDeDados(String sessaoId, String pergunta, String resposta) {
+        ChatMemory memoria = memorias.get(MemoriaPorSessao.idDados(sessaoId));
+        memoria.add(UserMessage.from(pergunta));
+        memoria.add(AiMessage.from(resposta));
+    }
+
+    private static String textoOuVazio(String answer) {
         if (answer == null || answer.isBlank()) {
-            answer = "(O modelo respondeu sem texto.)";
+            return "(O modelo respondeu sem texto.)";
         }
-        memory.add(UserMessage.from(userText));
-        memory.add(AiMessage.from(answer));
         return answer;
     }
 
@@ -164,12 +215,6 @@ public class ChatService {
                 || normalizado.contains("desconto");
     }
 
-    public synchronized void reset() {
-        memory.clear();
-        memory.add(SystemMessage.from(ChatConfig.SYSTEM_PROMPT));
-        memoriaProduto.clear();
-    }
-
     /**
      * Verdadeiro para assunto de manual: o que é o produto, benefício, regra, fórmula.
      * O acento é removido antes, então "benefício" e "beneficio" valem igual.
@@ -184,7 +229,7 @@ public class ChatService {
         return false;
     }
 
-    private String consultaDireta(IncomingMessage pedido) {
+    private ListaCalculada consultaDireta(IncomingMessage pedido) {
         List<String> modalidades = pedido.modalidades() == null || pedido.modalidades().isEmpty()
                 ? List.of("cheque")
                 : pedido.modalidades();
@@ -193,8 +238,8 @@ public class ChatService {
             if (valor == null || valor.signum() <= 0) {
                 throw new IllegalArgumentException("Informe um valor maior que zero.");
             }
-            return chequeConsulta.resumoAteValor(valor, modalidades);
+            return chequeConsulta.calcularAteValor(valor, modalidades);
         }
-        return chequeConsulta.resumoParaModelo(modalidades);
+        return chequeConsulta.calcularMelhores(modalidades);
     }
 }

@@ -1,23 +1,20 @@
 package com.estudo.cheques.config;
 
+import com.estudo.cheques.conversa.MemoriaPorSessao;
 import com.estudo.cheques.recebivel.RecebivelTools;
 import com.estudo.cheques.service.AssistenteRecebiveis;
-import dev.langchain4j.data.message.SystemMessage;
-import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.ollama.OllamaChatModel;
 import dev.langchain4j.service.AiServices;
 import java.time.Duration;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Liga o modelo de conversa. Ollama roda na máquina, em localhost:11434.
- * O modelo configurado é o llama3.2. Temperatura 0 deixa a resposta mais estável.
- * AssistenteRecebiveis é a interface que o LangChain4j implementa sozinho:
- * ele recebe a pergunta, pode chamar RecebivelTools e devolve o texto.
+ * Monta o caminho 5 na subida da API, antes de qualquer pergunta.
+ * 1. chatModel aponta para o llama3.2 no Ollama.
+ * 2. assistente junta esse modelo, a MemoriaPorSessao e as RecebivelTools.
+ * Quem usa o assistente pronto é o ChatService.reply.
  */
 @Configuration
 public class ChatConfig {
@@ -43,24 +40,18 @@ public class ChatConfig {
                 .build();
     }
 
-    @Bean(name = "memoriaChat")
-    ChatMemory memoriaChat() {
-        ChatMemory memory = MessageWindowChatMemory.builder()
-                .maxMessages(20)
-                .alwaysKeepSystemMessageFirst(true)
-                .build();
-        memory.add(SystemMessage.from(SYSTEM_PROMPT));
-        return memory;
-    }
-
+    /**
+     * chatMemoryProvider, e não uma memória única: cada sessão tem a própria chave.
+     * O texto de sistema vai na anotação de AssistenteRecebiveis.
+     */
     @Bean
     AssistenteRecebiveis assistente(
             ChatModel chatModel,
-            @Qualifier("memoriaChat") ChatMemory chatMemory,
+            MemoriaPorSessao memorias,
             RecebivelTools tools) {
         return AiServices.builder(AssistenteRecebiveis.class)
                 .chatModel(chatModel)
-                .chatMemory(chatMemory)
+                .chatMemoryProvider(memorias)
                 .tools(tools)
                 .maxToolCallingRoundTrips(3)
                 .build();

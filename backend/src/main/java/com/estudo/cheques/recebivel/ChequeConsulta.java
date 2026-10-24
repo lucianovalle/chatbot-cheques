@@ -14,8 +14,10 @@ import java.util.Set;
 import org.springframework.stereotype.Service;
 
 /**
- * Conta da antecipação. Esta classe não chama IA.
- * Custo = taxa diária da tabela taxas_juros × dias até o vencimento.
+ * Último da conta e o primeiro a ler cheque, boleto e taxas_juros.
+ * Quem chama: RecebivelTools, no caminho do modelo, ou ChatService, no botão Consultar.
+ * Esta classe não chama IA.
+ * Custo = taxa diária × dias até o vencimento.
  * Desconto = valor de face × custo. Líquido = valor de face − desconto.
  * A lista sai do menor custo para o maior. Título vencido fica de fora.
  */
@@ -53,6 +55,11 @@ public class ChequeConsulta {
     }
 
     public String resumoParaModelo(List<String> modalidades) {
+        return calcularMelhores(modalidades).texto();
+    }
+
+    /** Lista e texto do caminho "quais são melhores". A ordem já sai daqui. */
+    public ListaCalculada calcularMelhores(List<String> modalidades) {
         Apuracao apuracao = apurar(modalidades);
         StringBuilder texto = new StringBuilder();
         texto.append("Recebíveis em aberto de ")
@@ -62,10 +69,15 @@ public class ChequeConsulta {
                 .append(apuracao.hoje().format(DATA))
                 .append(".\n\n");
         appendLinhas(texto, apuracao.abertos());
-        return texto.toString();
+        return new ListaCalculada(texto.toString(), numerar(apuracao.abertos()));
     }
 
     public String resumoAteValor(BigDecimal alvo, List<String> modalidades) {
+        return calcularAteValor(alvo, modalidades).texto();
+    }
+
+    /** Lista e texto do caminho que cobre um valor. Para no primeiro líquido que completa a soma. */
+    public ListaCalculada calcularAteValor(BigDecimal alvo, List<String> modalidades) {
         if (alvo == null || alvo.signum() <= 0) {
             throw new IllegalArgumentException("Informe um valor maior que zero.");
         }
@@ -93,7 +105,7 @@ public class ChequeConsulta {
                     .append(dinheiro(alvo.subtract(soma)))
                     .append(".\n");
         }
-        return texto.toString();
+        return new ListaCalculada(texto.toString(), numerar(escolhidos));
     }
 
     private Apuracao apurar(List<String> modalidades) {
@@ -160,6 +172,24 @@ public class ChequeConsulta {
             throw new IllegalArgumentException("Marque cheque, boleto ou os dois.");
         }
         return escolhidas;
+    }
+
+    /** Mesma ordem do texto. A tela Antecipar usa esta lista, não lê o balão de novo. */
+    private static List<RecebivelItem> numerar(List<Linha> linhas) {
+        List<RecebivelItem> itens = new ArrayList<>();
+        int ordem = 1;
+        for (Linha linha : linhas) {
+            itens.add(new RecebivelItem(
+                    ordem++,
+                    linha.tipo(),
+                    linha.numero(),
+                    linha.valor(),
+                    linha.vencimento(),
+                    linha.dias(),
+                    linha.desconto(),
+                    linha.liquido()));
+        }
+        return itens;
     }
 
     private static void appendLinhas(StringBuilder texto, List<Linha> linhas) {

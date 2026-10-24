@@ -13,9 +13,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * Ferramentas que o llama3.2 pode chamar. O @Tool descreve a função para o modelo.
- * O modelo só escolhe qual chamar. Quem lê o MySQL e faz a conta é o ChequeConsulta.
- * IMMEDIATE devolve o texto do Java direto ao usuário, sem o modelo reescrever número.
+ * Quinto da fila, só no caminho de recebível.
+ * Quem chama: AssistenteRecebiveis, depois que o llama3.2 escolhe o nome da ferramenta.
+ * Quem esta classe chama: ChequeConsulta. Ela não fala com o Ollama.
+ * IMMEDIATE devolve o texto do Java direto à tela, sem o modelo reescrever número.
  */
 @Component
 public class RecebivelTools {

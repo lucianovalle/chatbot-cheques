@@ -1,13 +1,12 @@
 package com.estudo.cheques.config;
 
+import com.estudo.cheques.conversa.MemoriaPorSessao;
 import com.estudo.cheques.service.AssistenteProduto;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.loader.FileSystemDocumentLoader;
 import dev.langchain4j.data.document.parser.TextDocumentParser;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.segment.TextSegment;
-import dev.langchain4j.memory.ChatMemory;
-import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.ollama.OllamaEmbeddingModel;
@@ -24,19 +23,17 @@ import java.nio.file.Path;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * RAG: o modelo responde sobre o produto usando os arquivos da pasta docs.
- * Na subida da aplicação acontece isto:
- * 1. FileSystemDocumentLoader lê os .md.
+ * Monta o caminho 3 na subida da API. A pergunta ainda não chegou.
+ * 1. FileSystemDocumentLoader lê os .md da pasta docs.
  * 2. O texto é partido em pedaços.
- * 3. O nomic-embed-text transforma cada pedaço em números (embedding).
- * 4. Esses números ficam numa memória local, InMemoryEmbeddingStore.
- * 5. Quando a pergunta é de produto, os pedaços parecidos são enviados ao llama3.2.
- * O llama3.2 escreve a frase. Ele não calcula valor.
+ * 3. O nomic-embed-text transforma cada pedaço em números.
+ * 4. Esses números ficam no InMemoryEmbeddingStore. Somem quando a API desliga.
+ * 5. assistenteProduto junta o llama3.2, esses pedaços e a memória _manual.
+ * Quem chama o assistente pronto é o ChatService.reply. O modelo escreve a frase e não calcula valor.
  */
 @Configuration
 public class ManualConfig {
@@ -84,23 +81,16 @@ public class ManualConfig {
                 .build();
     }
 
-    @Bean(name = "memoriaProduto")
-    ChatMemory memoriaProduto() {
-        return MessageWindowChatMemory.builder()
-                .maxMessages(20)
-                .alwaysKeepSystemMessageFirst(true)
-                .build();
-    }
-
+    /** A memória do manual usa o mesmo provedor. A chave da sessão termina em "_manual". */
     @Bean
     AssistenteProduto assistenteProduto(
             ChatModel chatModel,
             ContentRetriever manuaisRetriever,
-            @Qualifier("memoriaProduto") ChatMemory memoriaProduto) {
+            MemoriaPorSessao memorias) {
         return AiServices.builder(AssistenteProduto.class)
                 .chatModel(chatModel)
                 .contentRetriever(manuaisRetriever)
-                .chatMemory(memoriaProduto)
+                .chatMemoryProvider(memorias)
                 .build();
     }
 

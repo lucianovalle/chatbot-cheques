@@ -1,10 +1,16 @@
 package com.estudo.cheques.service;
 
+import dev.langchain4j.service.MemoryId;
 import dev.langchain4j.service.SystemMessage;
+import dev.langchain4j.service.UserMessage;
 
 /**
- * Contrato do assistente de manual. O LangChain4j cria a implementação.
- * explicar busca pedaços em docs/ e o llama3.2 responde com esse texto.
+ * Caminho 3. Quem chama: ChatService.reply, antes do caminho de recebível.
+ * A ordem dentro do explicar é:
+ * 1. lê a memória _manual;
+ * 2. busca pedaços parecidos na pasta docs;
+ * 3. o llama3.2 escreve a resposta com esse texto.
+ * Não chama RecebivelTools e não lê o MySQL.
  */
 public interface AssistenteProduto {
 
@@ -15,5 +21,5 @@ public interface AssistenteProduto {
             Não invente taxa, valor, quantidade de títulos nem número de cheque ou boleto.
             Responda em português, em poucas frases.
             """)
-    String explicar(String pergunta);
+    String explicar(@MemoryId String memoryId, @UserMessage String pergunta);
 }
