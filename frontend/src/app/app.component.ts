@@ -147,7 +147,6 @@ export class AppComponent implements OnInit {
       'pessoa juridica',
       'titulos aceit',
       'titulo aceit',
-      'fluxo de caixa',
       'previsibilidade',
       'produto de antecip',
     ].some((assunto) => normalizado.includes(assunto));

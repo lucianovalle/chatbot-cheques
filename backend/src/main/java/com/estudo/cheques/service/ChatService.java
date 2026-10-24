@@ -51,7 +51,6 @@ public class ChatService {
         "pessoa juridica",
         "titulos aceit",
         "titulo aceit",
-        "fluxo de caixa",
         "previsibilidade",
         "produto de antecip"
     };
